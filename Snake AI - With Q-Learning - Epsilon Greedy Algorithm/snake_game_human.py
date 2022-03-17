@@ -141,7 +141,7 @@ class SnakeGame:
         """
         Check if the snake has collided with itself or the wall
         """
-        if self.head.x < 0 or self.head.x >= self.width - BLOCKSIZE or self.head.y < 0 or self.head.y >= self.height - BLOCKSIZE:
+        if self.head.x < 0 or self.head.x > self.width - BLOCKSIZE or self.head.y < 0 or self.head.y > self.height - BLOCKSIZE:
             return True
 
         # Check if snake has collided with itself
