@@ -10,7 +10,7 @@ font = pygame.font.Font('Lora-Regular.ttf', 20)
 
 # Define Constants
 BLOCKSIZE   = 20
-SPEED       = 10
+SPEED       = 100
 BLACK       = (0, 0, 0)
 WHITE       = (255, 255, 255)
 RED         = (255, 0, 0)
@@ -34,15 +34,16 @@ Point = namedtuple('Point', 'x, y')
 # Define Snake Class
 class SnakeGame:
 
-    def __init__(self, width: int = 640, height: int = 480) -> None:
+    def __init__(self, width: int = 1040, height: int = 720, n_games: int = 0) -> None:
 
         # Set Window Size
         self.width = width
         self.height = height
+        self.n_games = n_games
 
         # Initialize Window
         self.display = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("Snake Game")
+        pygame.display.set_caption(f"Snake Game  ({n_games}th Game)")
         self.clock = pygame.time.Clock()
 
         # Initialize Game State
@@ -190,6 +191,7 @@ class SnakeGame:
         # Draw the score
         text = font.render(f'Score: {self.score}', True, WHITE)
         self.display.blit(text, (1, 1))
+        pygame.display.set_caption(f"Snake Game  ({self.n_games}th Game)")
 
         # Update the display
         pygame.display.update()
