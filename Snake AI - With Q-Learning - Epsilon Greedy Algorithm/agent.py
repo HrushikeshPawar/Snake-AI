@@ -5,23 +5,33 @@ from collections import deque
 from snake_game_ai import SnakeGame, Direction, Point
 from model import QTrainer, Linear_QNet
 from helper import plot
+import os
 
 
 # Defining Constants
+# For Game Environment
+BLOCKSIZE   = 20
+GRID_H      = 10
+GRID_W      = 10
+GAME_SPEED  = 500
+
+# For Training Environment
 MAX_MEMORY      = 100_000
 BATCH_SIZE      = 1000
 LEARNING_RATE   = 0.001
-BLOCKSIZE       = 20
-CHK_FILE_PATH   = 'checkpoints/checkpoint.pth'
 CHK_DIR         = 'checkpoints'
 BEST_MODEL_DIR  = 'best_model'
+SUFFIX          = f'{GRID_H}x{GRID_W}'
+CHK_FILE_NAME   = f'checkpoints - ({SUFFIX}).pth'
+CHK_FILE_PATH   = os.path.join(CHK_DIR, CHK_FILE_NAME)
+EPOCH           = 300
 
 
 class Agent:
 
     def __init__(self) -> None:
         self.n_games = 0    # Number of Games
-        self.epsilon = 0  # Exploration Rate (Controls how much randomness is added to the action)
+        self.epsilon = 20  # Exploration Rate (Controls how much randomness is added to the action)
         self.gamma   = 0.99  # Discount Rate (Controls how much importance is given to future rewards)
         self.memory  = deque(maxlen=MAX_MEMORY)  # Memory (Stores the past experiences)
         self.model   = Linear_QNet(input_siz=11, hidden_size=256, output_size=3)  # Neural Network Model
@@ -133,12 +143,12 @@ def train():
         plot_average_scores = []
         total_score         = 0
 
-    record              = 0
-    agent               = Agent()
-    game                = SnakeGame(n_games=agent.n_games)
+    record = 0
+    agent  = Agent()
+    game   = SnakeGame(n_games=agent.n_games, height=GRID_H * BLOCKSIZE, width=GRID_W * BLOCKSIZE, speed=GAME_SPEED)
 
     # Start Training
-    while True:
+    while agent.n_games < EPOCH:
 
         # Get Old State
         old_state = agent.get_state(game)
@@ -179,10 +189,10 @@ def train():
                 record = score
 
                 # Save CheckPoint
-                agent.model.save_checkPoints(checkpoint, CHK_DIR, BEST_MODEL_DIR, is_best=True)
+                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_DIR, is_best=True, suffix=SUFFIX)
 
             else:
-                agent.model.save_checkPoints(checkpoint, CHK_DIR, BEST_MODEL_DIR)
+                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_DIR, suffix=SUFFIX)
 
             print(f'Game {agent.n_games} | Score: {score} | Record: {record}')
 
@@ -191,7 +201,7 @@ def train():
             total_score += score
             average_score = total_score / agent.n_games
             plot_average_scores.append(average_score)
-            plot(plot_scores, plot_average_scores)
+            plot(plot_scores, plot_average_scores, SUFFIX, save_plot=True)
 
 
 if __name__ == "__main__":

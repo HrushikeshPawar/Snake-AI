@@ -1,12 +1,14 @@
 import matplotlib.pyplot as plt
 from IPython import display
+import os
 
 
 # Enable interactive mode
 plt.ion()
+PLOT_DIR = 'images'
 
 
-def plot(scores, mean_scores, save_plot=False):
+def plot(scores, mean_scores, suffix, save_plot=False):
 
     display.clear_output(wait=True)
     display.display(plt.gcf())
@@ -23,4 +25,10 @@ def plot(scores, mean_scores, save_plot=False):
     plt.pause(.1)
 
     if save_plot:
-        plt.savefig('plot.png')
+
+        if not os.path.exists(PLOT_DIR):
+            os.mkdir(PLOT_DIR)
+
+        IMG_Path = os.path.join(PLOT_DIR, f'Training History - ({suffix}).png')
+
+        plt.savefig(IMG_Path)

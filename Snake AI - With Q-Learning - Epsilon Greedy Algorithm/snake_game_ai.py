@@ -10,7 +10,9 @@ font = pygame.font.Font('Lora-Regular.ttf', 20)
 
 # Define Constants
 BLOCKSIZE   = 20
-SPEED       = 100
+GRID_H      = 10
+GRID_W      = 10
+SPEED       = 500
 BLACK       = (0, 0, 0)
 WHITE       = (255, 255, 255)
 RED         = (255, 0, 0)
@@ -34,12 +36,13 @@ Point = namedtuple('Point', 'x, y')
 # Define Snake Class
 class SnakeGame:
 
-    def __init__(self, width: int = 1040, height: int = 720, n_games: int = 0) -> None:
+    def __init__(self, width: int = BLOCKSIZE * GRID_W, height: int = BLOCKSIZE * GRID_H, n_games: int = 0, speed: int = 20) -> None:
 
         # Set Window Size
         self.width = width
         self.height = height
         self.n_games = n_games
+        self.speed = speed
 
         # Initialize Window
         self.display = pygame.display.set_mode((self.width, self.height))
@@ -78,7 +81,13 @@ class SnakeGame:
         if self.food in self.snake:
             self._place_food()
 
-    def play_step(self, action) -> None:
+    def _moved_closer_to_food(self) -> bool:
+        """
+        Check if the snake is closer to the food than the previous frame
+        """
+        return (self.head.x - self.food.x) ** 2 + (self.head.y - self.food.y) ** 2 < (self.snake[1].x - self.food.x) ** 2 + (self.snake[1].y - self.food.y) ** 2
+
+    def play_step(self, action) -> tuple:
         """
         Play one step of the game
         """
@@ -94,26 +103,31 @@ class SnakeGame:
 
         # Step 3 - Check if Game Over
         game_over = False
-        reward    = 0
         if self._is_collision() or self.frame_iteration > 100 * len(self.snake):
             game_over   = True
-            reward      = -10
+            reward      = -100
             return reward, game_over, self.score
 
         # Step 4 - Place new food or just move
         if self.head == self.food:
             self.score += 1
             reward     = 10
+            # reward     = 100
             self._place_food()
         else:
+
+            if self._moved_closer_to_food():
+                reward = 1
+            else:
+                reward = -10
             self.snake.pop()
 
         # Step 5 - Update UI and clock
         self._update_ui()
-        self.clock.tick(SPEED)
+        self.clock.tick(self.speed)
 
         # Step 6 - Return Game Over and Score
-        return reward, game_over, self.score
+        return (reward, game_over, self.score)
 
     def _get_input(self) -> None:
 

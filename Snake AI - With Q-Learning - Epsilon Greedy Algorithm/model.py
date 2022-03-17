@@ -5,6 +5,7 @@ import torch.optim as optim
 import torch.nn.functional as Funtional
 import os
 import shutil
+import numpy as np
 
 
 class Linear_QNet(Module):
@@ -30,19 +31,19 @@ class Linear_QNet(Module):
 
         torch.save(self.state_dict(), os.path.join(model_folder, file_name))
 
-    def save_checkPoints(self, state, checkpoint_dir, best_model_dir, is_best=False) -> None:
+    def save_checkPoints(self, state, checkpoint_dir, checkpoint_name, best_model_dir, suffix, is_best=False) -> None:
 
         # Save the model
         if not os.path.exists(checkpoint_dir):
             os.mkdir(checkpoint_dir)
-        fpath = os.path.join(checkpoint_dir, 'checkpoint.pth')
+        fpath = os.path.join(checkpoint_dir, checkpoint_name)
         torch.save(state, fpath)
 
         # If it is the best model so far, save it
         if not os.path.exists(best_model_dir):
             os.mkdir(best_model_dir)
         if is_best:
-            best_fpath = os.path.join(best_model_dir, 'best_model.pth')
+            best_fpath = os.path.join(best_model_dir, f'best_model - ({suffix}).pth')
             shutil.copyfile(fpath, best_fpath)
 
     def load_checkPoints(self, model, trainer, checkpoint_fpath) -> None:
@@ -73,10 +74,10 @@ class QTrainer:
 
         # Inputs can be single or batch
         # Hence convert them into tensor
-        state       = torch.tensor(state, dtype=torch.float)
+        state       = torch.tensor(np.array(state), dtype=torch.float)
         action      = torch.tensor(action, dtype=torch.long)
         reward      = torch.tensor(reward, dtype=torch.float)
-        next_state  = torch.tensor(next_state, dtype=torch.float)
+        next_state  = torch.tensor(np.array(next_state), dtype=torch.float)
 
         # If its just single input
         if len(state.shape) == 1:
