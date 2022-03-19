@@ -4,7 +4,8 @@ from enum import Enum
 from random import randint
 import os
 import glob
-from PIL import Image
+# from PIL import Image
+import moviepy.editor as mpy
 from time import perf_counter
 from datetime import datetime
 
@@ -237,23 +238,32 @@ class Game:
         duration  = int(end_time - self.start_time)
         print(f'Game Time : {end_time - self.start_time}')
 
-        frames = []
+        # frames = []
         print('\nMaking GIF...')
 
         imgs = glob.glob(os.path.join(IMG_DIR, "*.png"))
         list.sort(imgs, key=lambda x: int(x.split('screenshot')[1].split('.png')[0]))
-        for i in imgs:
-            new_frame = Image.open(i)
-            frames.append(new_frame)
+        # for i in imgs:
+        #     new_frame = Image.open(i)
+        #     frames.append(new_frame)
 
-        # Save into a GIF file that loops forever
-        n = len(glob.glob(os.path.join(IMG_DIR, "*.gif")))
+        # # Save into a GIF file that loops forever
+        # frames[0].save(
+        #     filename, format='GIF', append_images=frames[1:], save_all=True,
+        #     duration=duration, loop=0
+        # )
+        txt_path = os.path.join(IMG_DIR, 'Image_List.txt')
+        with open(txt_path, 'w') as file:
+            for item in imgs:
+                file.write(f"{item}\n")
+
+        FPS = len(imgs) // duration
         now = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        n = len(glob.glob(os.path.join(IMG_DIR, "*.gif")))
         filename = os.path.join(IMG_DIR, f'Game {n} - {self.solver} - {GRID_W} X {GRID_H} Grid - {now}.gif')
-        frames[0].save(
-            filename, format='GIF', append_images=frames[1:], save_all=True,
-            duration=duration, loop=0
-        )
+
+        clip = mpy.ImageSequenceClip(imgs, fps=FPS)
+        clip.write_gif(filename, fps=FPS)
         os.startfile(filename)
 
         # Remove all the images
