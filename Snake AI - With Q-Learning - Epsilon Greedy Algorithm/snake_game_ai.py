@@ -12,7 +12,7 @@ font = pygame.font.Font('Lora-Regular.ttf', 20)
 BLOCKSIZE   = 20
 GRID_H      = 10
 GRID_W      = 10
-SPEED       = 500
+SPEED       = 20
 BLACK       = (0, 0, 0)
 WHITE       = (255, 255, 255)
 RED         = (255, 0, 0)
@@ -177,7 +177,7 @@ class SnakeGame:
         if pt is None:
             pt = self.head
 
-        if pt.x < 0 or pt.x >= self.width - BLOCKSIZE or pt.y < 0 or pt.y >= self.height - BLOCKSIZE:
+        if pt.x < 0 or pt.x > self.width - BLOCKSIZE or pt.y < 0 or pt.y > self.height - BLOCKSIZE:
             return True
 
         # Check if snake has collided with itself

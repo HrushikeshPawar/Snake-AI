@@ -2,6 +2,11 @@ import pygame
 from collections import namedtuple, deque
 from enum import Enum
 from random import randint
+import os
+import glob
+from PIL import Image
+from time import perf_counter
+from datetime import datetime
 
 
 # Initialize pygame
@@ -13,7 +18,7 @@ font = pygame.font.Font('Lora-Regular.ttf', 20)
 BLOCKSIZE   = 20
 GRID_H      = 10
 GRID_W      = 10
-SPEED       = 2
+SPEED       = 20
 
 # Colors
 BLACK       = (0, 0, 0)
@@ -23,6 +28,9 @@ RED         = (255, 0, 0)
 GREEN       = (0, 255, 0)
 BLUE        = (0, 0, 255)
 BLUE2       = (0, 100, 255)
+
+# DIRS
+IMG_DIR     = 'Pics'
 
 
 # The Point Class to store the coordinates of the snake
@@ -104,23 +112,32 @@ class Snake:
 class Game:
 
     def __init__(self, height: int = BLOCKSIZE * GRID_H, width: int = BLOCKSIZE * GRID_W,
-                 speed: int = SPEED, n_games: int = 0, ishuman: bool = False) -> None:
-        super().__init__()
+                 speed: int = SPEED, n_games: int = 0, ishuman: bool = False, solver: str = None,
+                 save_gif: bool = False) -> None:
 
         # Set required variables
-        self.height  = height
-        self.width   = width
-        self.speed   = speed
-        self.n_games = n_games
-        self.ishuman = ishuman
+        self.height   = height
+        self.width    = width
+        self.speed    = speed
+        self.n_games  = n_games
+        self.ishuman  = ishuman
+        self.save_gif = save_gif
 
         # Initialize Pygame Window
         self.display = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption(f"Snake Game  ({n_games}th Game)")
+
+        if self.ishuman:
+            pygame.display.set_caption("Snake Game")
+        else:
+            pygame.display.set_caption(f"Snake Game  ({n_games}th Game)")
+            self.solver = solver
         self.clock = pygame.time.Clock()
 
         # Initialize the Game
         self.reset_game()
+        self.start_time = perf_counter()
+        pygame.image.save(self.display, os.path.join(IMG_DIR, "screenshot00.png"))
+        self.img_cnt = 1
 
     def reset_game(self) -> None:
         """
@@ -155,6 +172,8 @@ class Game:
         Place the food on the screen
         """
         self.food = self.random_point()
+        while self.food in self.snake.tail or self.food == self.snake.head:
+            self.food = self.random_point()
 
     def _get_input(self) -> None:
 
@@ -163,6 +182,7 @@ class Game:
             # CHECK IF USER QUITS
             if event.type == pygame.QUIT:
                 print('\n\nExiting...')
+                print(f'Your score is {score}.\n')
                 pygame.quit()
                 quit()
 
@@ -209,7 +229,38 @@ class Game:
         # Update the display
         pygame.display.update()
 
-    def play_step(self, action: list = None) -> None:
+    def _save_gif(self) -> None:
+        """
+        Save the game as a gif
+        """
+        end_time  = perf_counter()
+        duration  = int(end_time - self.start_time)
+        print(f'Game Time : {end_time - self.start_time}')
+
+        frames = []
+        print('\nMaking GIF...')
+
+        imgs = glob.glob(os.path.join(IMG_DIR, "*.png"))
+        list.sort(imgs, key=lambda x: int(x.split('screenshot')[1].split('.png')[0]))
+        for i in imgs:
+            new_frame = Image.open(i)
+            frames.append(new_frame)
+
+        # Save into a GIF file that loops forever
+        n = len(glob.glob(os.path.join(IMG_DIR, "*.gif")))
+        now = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        filename = os.path.join(IMG_DIR, f'Game {n} - {self.solver} - {GRID_W} X {GRID_H} Grid - {now}.gif')
+        frames[0].save(
+            filename, format='GIF', append_images=frames[1:], save_all=True,
+            duration=duration, loop=0
+        )
+        os.startfile(filename)
+
+        # Remove all the images
+        for img in imgs:
+            os.remove(img)
+
+    def play_step(self, action: Direction = None) -> None:
         """
         Play a single step of the game
         """
@@ -222,12 +273,18 @@ class Game:
         if self.ishuman:
             self.snake.move(self.snake.direction)
         else:
+            self.snake.move(action)
             pass
+        pygame.image.save(self.display, os.path.join(IMG_DIR, f"screenshot0{self.img_cnt}.png"))
+        self.img_cnt += 1
 
         # Step 3 - Check if Game Over
         game_over = False
         if self._is_collision():
             game_over = True
+
+            if self.save_gif:
+                self._save_gif()
 
             if self.ishuman:
                 return game_over, self.score
@@ -237,6 +294,7 @@ class Game:
         # Step 4 - Place new food or just move
         if self.snake.head == self.food:
             self.score += 1
+            self.snake.length += 1
             self._place_food()
         else:
             try:
@@ -246,6 +304,8 @@ class Game:
 
             if not self.ishuman:
                 pass
+        # pygame.image.save(self.display, os.path.join(IMG_DIR, f"screenshot0{self.img_cnt}.png"))
+        # self.img_cnt += 1
 
         # Step 5 - Update UI and clock
         self._update_ui()
@@ -264,9 +324,10 @@ if __name__ == '__main__':
             game_over, score = game.play_step()
 
             if game_over:
-                print(f'Game Over! Your score is {score}')
+                print(f'Game Over! Your score is {score}.\n')
                 break
     except KeyboardInterrupt:
         print('\n\nExiting...')
+        print(f'Your score is {score}.\n')
         pygame.quit()
         quit()
