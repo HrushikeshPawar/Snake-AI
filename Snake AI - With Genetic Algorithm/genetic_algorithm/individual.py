@@ -61,6 +61,7 @@ class Individual(ABC):
         # This is the setter for our chromosome property
         # We cannot let it be set manual in the subclasses, but it needs to use the decode method
         # Here we just raise an error in case the method is not used or is tried to set manually
+        # For us it will be an np.array of dimension 1
         raise Exception('Chromosome Property cannot be set manually.')
 
     @abstractmethod
