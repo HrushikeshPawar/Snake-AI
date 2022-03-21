@@ -20,6 +20,7 @@ BLOCKSIZE   = 20
 GRID_H      = 10
 GRID_W      = 10
 SPEED       = 20
+BORDER      = 3
 
 # Colors
 BLACK       = (0, 0, 0)
@@ -27,6 +28,7 @@ GREY        = (150, 150, 150)
 WHITE       = (255, 255, 255)
 RED         = (255, 0, 0)
 GREEN       = (0, 255, 0)
+GREEN2      = (100, 255, 0)
 BLUE        = (0, 0, 255)
 BLUE2       = (0, 100, 255)
 
@@ -158,8 +160,10 @@ class Game:
         """
         Generate a random point
         """
-        x = randint(0, (self.width - BLOCKSIZE) // BLOCKSIZE) * BLOCKSIZE
-        y = randint(0, (self.height - BLOCKSIZE) // BLOCKSIZE) * BLOCKSIZE
+        # x = randint(0, (self.width - BLOCKSIZE) // BLOCKSIZE) * BLOCKSIZE
+        # y = randint(0, (self.height - BLOCKSIZE) // BLOCKSIZE) * BLOCKSIZE
+        x = randint(0, GRID_W - 1) * BLOCKSIZE
+        y = randint(0, GRID_H - 1) * BLOCKSIZE
         return Point(x, y)
 
     def _place_snake(self) -> None:
@@ -182,10 +186,11 @@ class Game:
 
             # CHECK IF USER QUITS
             if event.type == pygame.QUIT:
-                print('\n\nExiting...')
-                print(f'Your score is {score}.\n')
-                pygame.quit()
-                quit()
+                # print('\n\nExiting...')
+                # print(f'Your score is {score}.\n')
+                # pygame.quit()
+                # quit()
+                raise KeyboardInterrupt
 
             # CHECK IF USER PRESSES A KEY
             if self.ishuman and event.type == pygame.KEYDOWN:
@@ -214,14 +219,20 @@ class Game:
         self.display.fill(BLACK)
 
         # Draw the food
-        pygame.draw.rect(self.display, RED, (self.food.x, self.food.y, BLOCKSIZE, BLOCKSIZE))
+        pygame.draw.rect(self.display, RED, (self.food.x, self.food.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
 
         # Draw the snake
-        pygame.draw.rect(self.display, GREY, (self.snake.head.x, self.snake.head.y, BLOCKSIZE, BLOCKSIZE))
-        pygame.draw.rect(self.display, WHITE, (self.snake.head.x + 4, self.snake.head.y + 4, 12, 12))
-        for point in self.snake.tail:
-            pygame.draw.rect(self.display, BLUE, (point.x, point.y, BLOCKSIZE, BLOCKSIZE))
-            pygame.draw.rect(self.display, BLUE2, (point.x + 4, point.y + 4, 12, 12))
+        pygame.draw.rect(self.display, GREY, (self.snake.head.x, self.snake.head.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+        pygame.draw.rect(self.display, WHITE, (self.snake.head.x + 4, self.snake.head.y + 4, 12 - BORDER, 12 - BORDER))
+        try:
+            for point in self.snake.tail[:-1]:
+                pygame.draw.rect(self.display, BLUE, (point.x, point.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+                pygame.draw.rect(self.display, BLUE2, (point.x + 4, point.y + 4, 12 - BORDER, 12 - BORDER))
+            point = self.snake.tail[-1]
+            pygame.draw.rect(self.display, GREEN, (point.x, point.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+            pygame.draw.rect(self.display, GREEN2, (point.x + 4, point.y + 4, 12 - BORDER, 12 - BORDER))
+        except IndexError:
+            pass
 
         # Draw the score
         text = font.render(f'Score: {self.score}', True, WHITE)
@@ -269,6 +280,7 @@ class Game:
         # Remove all the images
         for img in imgs:
             os.remove(img)
+        print(f'Removed {len(imgs)} images.')
 
     def play_step(self, action: Direction = None) -> None:
         """
@@ -288,7 +300,18 @@ class Game:
         pygame.image.save(self.display, os.path.join(IMG_DIR, f"screenshot0{self.img_cnt}.png"))
         self.img_cnt += 1
 
-        # Step 3 - Check if Game Over
+        # Step 3 - Place new food or just move
+        if self.snake.head == self.food:
+            self.score += 1
+            self.snake.length += 1
+            self._place_food()
+        else:
+            try:
+                self.snake.tail.pop()
+            except IndexError:
+                pass
+
+        # Step 4 - Check if Game Over
         game_over = False
         if self._is_collision():
             game_over = True
@@ -299,17 +322,6 @@ class Game:
             if self.ishuman:
                 return game_over, self.score
             else:
-                pass
-
-        # Step 4 - Place new food or just move
-        if self.snake.head == self.food:
-            self.score += 1
-            self.snake.length += 1
-            self._place_food()
-        else:
-            try:
-                self.snake.tail.pop()
-            except IndexError:
                 pass
 
             if not self.ishuman:
