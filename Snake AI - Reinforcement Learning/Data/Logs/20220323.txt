@@ -1,0 +1,4 @@
+Game 1 | Grid 10 X 10 | 20220323 | Record: 2 | Average Score: 0.07103825136612021 |
+Game 2 | Grid 10 X 10 | 20220323 | Record: 2 | Average Score: 0.0755813953488372 |
+Game 3 | Grid 10 X 10 | 20220323 | Record: 0 | Average Score: 0.0 |
+Game 4 | Grid 10 X 10 | 20220323 | Record: 3 | Average Score: 0.121 |
