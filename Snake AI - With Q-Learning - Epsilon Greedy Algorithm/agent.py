@@ -6,25 +6,27 @@ from snake_game_ai import SnakeGame, Direction, Point
 from model import QTrainer, Linear_QNet
 from helper import plot
 import os
+from datetime import datetime
 
 
 # Defining Constants
 # For Game Environment
 BLOCKSIZE   = 20
-GRID_H      = 10
-GRID_W      = 10
-GAME_SPEED  = 500
+GRID_H      = 8
+GRID_W      = 8
+GAME_SPEED  = 5000
 
 # For Training Environment
 MAX_MEMORY      = 100_000
-BATCH_SIZE      = 1000
+BATCH_SIZE      = 3000
 LEARNING_RATE   = 0.001
 CHK_DIR         = 'checkpoints'
 BEST_MODEL_DIR  = 'best_model'
 SUFFIX          = f'{GRID_H}x{GRID_W}'
-CHK_FILE_NAME   = f'checkpoints - ({SUFFIX}).pth'
-CHK_FILE_PATH   = os.path.join(CHK_DIR, CHK_FILE_NAME)
-EPOCH           = 300
+TODAY           = datetime.today().strftime('%Y%m%d')
+# CHK_FILE_NAME   = f'checkpoints - ({SUFFIX}) ({TODAY}).pth'
+# CHK_FILE_PATH   = os.path.join(CHK_DIR, CHK_FILE_NAME)
+EPOCH           = 1000
 
 
 class Agent:
@@ -38,6 +40,7 @@ class Agent:
         self.trainer = QTrainer(self.model, learning_rate=LEARNING_RATE, gamma=self.gamma)  # Optimizer
 
         # Load Saved checkpoint
+        global CHK_FILE_PATH
         try:
             self.model, self.trainer, self.n_games = self.model.load_checkPoints(self.model, self.trainer, CHK_FILE_PATH)
         except FileNotFoundError:
@@ -58,6 +61,11 @@ class Agent:
         dir_r = game.direction == Direction.RIGHT
         dir_u = game.direction == Direction.UP
         dir_d = game.direction == Direction.DOWN
+
+        # dir_tail_l = game.tail_direction == Direction.LEFT
+        # dir_tail_r = game.tail_direction == Direction.RIGHT
+        # dir_tail_u = game.tail_direction == Direction.UP
+        # dir_tail_d = game.tail_direction == Direction.DOWN
 
         # State of the game
         state = np.array([
@@ -81,10 +89,16 @@ class Agent:
             (dir_d and game._is_collision(point_r)),
 
             # Current Move Direction
-            dir_l,
-            dir_r,
             dir_u,
+            dir_r,
             dir_d,
+            dir_l,
+
+            # # Then add the direction of the tails
+            # dir_tail_u,
+            # dir_tail_r,
+            # dir_tail_d,
+            # dir_tail_l,
 
             # Food Location
             game.food.x < game.head.x,   # Food is to the left of the snake
@@ -115,10 +129,10 @@ class Agent:
     def get_action(self, state: np.ndarray) -> list:
 
         # Random Moves = Tradeoff between exploration and exploitation
-        self.epsilon = 80 - self.n_games
+        self.epsilon = EPOCH // 3 - self.n_games
         action = [0, 0, 0]
 
-        if random.randint(0, 200) < self.epsilon:
+        if random.randint(0, EPOCH // 3) < self.epsilon:
             move = random.randint(0, 2)
             action[move] = 1
         else:
@@ -131,6 +145,12 @@ class Agent:
 
 
 def train():
+    global nth_game, CHK_FILE_PATH
+
+    CHK_FILE_NAME = f'{TODAY} - Game {nth_game} - Grid {GRID_W} X {GRID_H}.pth'
+    CHK_FILE_PATH = os.path.join(CHK_DIR, CHK_FILE_NAME)
+    BEST_MODEL_FPATH = os.path.join(BEST_MODEL_DIR, f'{TODAY} - Game {nth_game} - Grid {GRID_W} X {GRID_H}.pth')
+    PLOT_FNAME = f'{TODAY} - Game {nth_game} - Grid {GRID_W} X {GRID_H}.png'
 
     # Define required variables
     try:
@@ -146,6 +166,8 @@ def train():
     record = 0
     agent  = Agent()
     game   = SnakeGame(n_games=agent.n_games, height=GRID_H * BLOCKSIZE, width=GRID_W * BLOCKSIZE, speed=GAME_SPEED)
+    print('Starting the Training Process...')
+    print(agent.n_games)
 
     # Start Training
     while agent.n_games < EPOCH:
@@ -189,10 +211,10 @@ def train():
                 record = score
 
                 # Save CheckPoint
-                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_DIR, is_best=True, suffix=SUFFIX)
+                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_FPATH, is_best=True)
 
             else:
-                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_DIR, suffix=SUFFIX)
+                agent.model.save_checkPoints(checkpoint, CHK_DIR, CHK_FILE_NAME, BEST_MODEL_FPATH)
 
             print(f'Game {agent.n_games} | Score: {score} | Record: {record}')
 
@@ -201,10 +223,12 @@ def train():
             total_score += score
             average_score = total_score / agent.n_games
             plot_average_scores.append(average_score)
-            plot(plot_scores, plot_average_scores, SUFFIX, save_plot=True)
+            plot(plot_scores, plot_average_scores, PLOT_FNAME, save_plot=True)
 
 
 if __name__ == "__main__":
+    today = datetime.today().strftime("%Y%m%d")
+    nth_game = 6
     try:
         train()
     except KeyboardInterrupt:

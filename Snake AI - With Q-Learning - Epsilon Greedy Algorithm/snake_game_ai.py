@@ -1,8 +1,7 @@
 import pygame
-from enum import Enum
-from collections import namedtuple
 import random  # for random food placement generation
 import numpy as np
+from helper import Direction, Point, VISION4, Vision
 
 # Initialize pygame
 pygame.init()
@@ -19,18 +18,7 @@ RED         = (255, 0, 0)
 GREEN       = (0, 255, 0)
 BLUE        = (0, 0, 255)
 BLUE2       = (0, 100, 255)
-
-
-# Define Direction Class
-class Direction(Enum):
-    UP = 1
-    DOWN = 2
-    LEFT = 3
-    RIGHT = 4
-
-
-# Define Point as NamedTuple
-Point = namedtuple('Point', 'x, y')
+VISION      = VISION4
 
 
 # Define Snake Class
@@ -58,6 +46,7 @@ class SnakeGame:
         self.direction  = Direction.RIGHT
         self.head       = Point(self.width // 2, self.height // 2)
         self.snake      = [self.head, Point(self.head.x - BLOCKSIZE, self.head.y), Point(self.head.x - 2 * BLOCKSIZE, self.head.y)]
+        self.tail_direction = Direction.RIGHT
 
         # Place food
         self.food = None
@@ -68,6 +57,7 @@ class SnakeGame:
 
         # Initialize Frame Iteration Count
         self.frame_iteration = 0
+        # self._update_vision()
 
     def _place_food(self) -> None:
         """
@@ -85,7 +75,72 @@ class SnakeGame:
         """
         Check if the snake is closer to the food than the previous frame
         """
-        return (self.head.x - self.food.x) ** 2 + (self.head.y - self.food.y) ** 2 < (self.snake[1].x - self.food.x) ** 2 + (self.snake[1].y - self.food.y) ** 2
+        return (self.head.x - self.food.x) + (self.head.y - self.food.y) < (self.snake[1].x - self.food.x) + (self.snake[1].y - self.food.y)
+
+    # Check if the point is inside the grid
+    def _is_inside_grid(self, point : Point) -> bool:
+        """
+        Check if the point is inside the grid
+        """
+        return point.x >= 0 and point.x < self.width - BLOCKSIZE and point.y >= 0 and point.y < self.height - BLOCKSIZE
+
+    # Check if food is in the given direction
+    def _is_food_in_direction(self, direction: Direction) -> bool:
+        """
+        Check if food is in the given direction
+        """
+        p = self.head.copy()
+        p += direction.value
+        while self._is_inside_grid(p):
+            if p == self.food:
+                return True
+            p += direction.value
+
+        return False
+
+    # Check if the snake's body is in the given direction
+    def _is_body_in_direction(self, direction: Direction) -> bool:
+        """
+        Check if body of the snake is in the given direction
+        """
+        p = self.head.copy()
+        p += direction.value
+        while self._is_inside_grid(p):
+            if p in self.snake[1:]:
+                return True
+            p += direction.value
+
+        return False
+
+    # Find distance from head to wall in given direction
+    def _distance_to_wall(self, direction: Direction) -> float:
+        """
+        Find distance from head to wall in given direction
+        """
+        p = self.head.copy()
+        p += direction.value
+        distance = 0
+        while self._is_inside_grid(p):
+            distance += 1
+            p += direction.value
+        if distance == 0:
+            return 1.0
+        return 1 / distance
+
+    # Update Vision of the snake
+    def _update_vision(self) -> None:
+        """
+        Update the vision of the snake
+        """
+        self.vision = []
+        for dir in VISION:
+            v = Vision(
+                direction=dir,
+                dist_to_wall=self._distance_to_wall(Direction(dir)),
+                is_food_visible=self._is_food_in_direction(Direction(dir)),
+                is_self_visible=self._is_body_in_direction(Direction(dir))
+            )
+            self.vision.append(v)
 
     def play_step(self, action) -> tuple:
         """
@@ -103,9 +158,10 @@ class SnakeGame:
 
         # Step 3 - Check if Game Over
         game_over = False
-        if self._is_collision() or self.frame_iteration > 100 * len(self.snake):
+        if self._is_collision() or self.frame_iteration > GRID_H * GRID_W:
             game_over   = True
             reward      = -100
+            self.frame_iteration = 0
             return reward, game_over, self.score
 
         # Step 4 - Place new food or just move
@@ -138,6 +194,16 @@ class SnakeGame:
                 pygame.quit()
                 quit()
 
+    def _get_directions(self, point: Point) -> Direction:
+
+        directions = {
+            Point(0, -1): Direction.UP,
+            Point(0, 1): Direction.DOWN,
+            Point(-1, 0): Direction.LEFT,
+            Point(1, 0): Direction.RIGHT
+        }
+        return directions[point]
+
     def _move_snake(self, action) -> None:
 
         # Define move in terms of [Straight, Left Turn, Right Turn]
@@ -168,6 +234,13 @@ class SnakeGame:
 
         # Update the head
         self.head = Point(x, y)
+
+        # Update the tail direction
+        if len(self.snake) == 1:
+            self.tail_direction = self.direction
+        else:
+            p = self.snake[-2] - self.snake[-1]
+            self.tail_direction = self._get_directions(Point(p.x // BLOCKSIZE, p.y // BLOCKSIZE))
 
     def _is_collision(self, pt: Point = None) -> bool:
         """

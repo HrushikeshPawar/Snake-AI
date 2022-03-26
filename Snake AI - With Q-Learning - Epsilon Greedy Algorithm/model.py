@@ -31,7 +31,7 @@ class Linear_QNet(Module):
 
         torch.save(self.state_dict(), os.path.join(model_folder, file_name))
 
-    def save_checkPoints(self, state, checkpoint_dir, checkpoint_name, best_model_dir, suffix, is_best=False) -> None:
+    def save_checkPoints(self, state, checkpoint_dir, checkpoint_name, best_model_fpath, is_best=False) -> None:
 
         # Save the model
         if not os.path.exists(checkpoint_dir):
@@ -40,11 +40,11 @@ class Linear_QNet(Module):
         torch.save(state, fpath)
 
         # If it is the best model so far, save it
-        if not os.path.exists(best_model_dir):
-            os.mkdir(best_model_dir)
+        # if not os.path.exists(best_model_dir):
+        #     os.mkdir(best_model_dir)
         if is_best:
-            best_fpath = os.path.join(best_model_dir, f'best_model - ({suffix}).pth')
-            shutil.copyfile(fpath, best_fpath)
+            # best_fpath = os.path.join(best_model_dir, f'best_model - ({suffix}).pth')
+            shutil.copyfile(fpath, best_model_fpath)
 
     def load_checkPoints(self, model, trainer, checkpoint_fpath) -> None:
         """
