@@ -371,7 +371,7 @@ if __name__ == "__main__":
 
     # Initialize the logging of results
     today = datetime.today().strftime('%Y%m%d')
-    log_fpath = os.path.join(Log_path, f'{today}.txt')
+    log_fpath = os.path.join(Log_path, f'{today}.log')
     nth_game = 26
 
     # Initialize the logging of results
