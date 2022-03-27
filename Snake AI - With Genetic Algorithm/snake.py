@@ -1,141 +1,153 @@
-import numpy as np
-from typing import Tuple, Optional, Union, Dict, Any, List
-import random
 from collections import deque
-import os
 import json
-
-from helper import Point, VISION_8
+import os
 from genetic_algorithm.individual import Individual
-from neural_network import FeedForwardNetwork, linear, sigmoid, tanh, relu, leaky_relu, ActivationFunction, get_activation_by_name
+from settings import settings
+from typing import Any, List, Optional, Dict, Tuple, Union
+import numpy as np
+from helper import Point, Direction, Vision, VISION_8, VISION_4
+from neural_network import FeedForwardNetwork, get_activation_by_name
+from random import randint, choice
 
 
-
-class Vision(object):
-    __slots__ = ('dist_to_wall', 'dist_to_apple', 'dist_to_self')
-    def __init__(self,
-                 dist_to_wall: Union[float, int],
-                 dist_to_apple: Union[float, int],
-                 dist_to_self: Union[float, int]
-                 ):
-        self.dist_to_wall = float(dist_to_wall)
-        self.dist_to_apple = float(dist_to_apple)
-        self.dist_to_self = float(dist_to_self)
-
-class DrawableVision(object):
-    __slots__ = ('wall_location', 'apple_location', 'self_location')
-    def __init__(self,
-                wall_location: Point,
-                apple_location: Optional[Point] = None,
-                self_location: Optional[Point] = None,
-                ):
-        self.wall_location = wall_location
-        self.apple_location = apple_location
-        self.self_location = self_location
+# Defining Constants
+GRID_H, GRID_W = settings['grid_size']
 
 
+# The Snake Class
 class Snake(Individual):
-    def __init__(self, board_size: Tuple[int, int],
-                 chromosome: Optional[Dict[str, List[np.ndarray]]] = None,
-                 start_pos: Optional[Point] = None, 
-                 apple_seed: Optional[int] = None,
-                 initial_velocity: Optional[str] = None,
-                 starting_direction: Optional[str] = None,
-                 hidden_layer_architecture: Optional[List[int]] = [1123125, 9],
-                 hidden_activation: Optional[ActivationFunction] = 'relu',
-                 output_activation: Optional[ActivationFunction] = 'sigmoid',
-                 lifespan: Optional[Union[int, float]] = np.inf,
-                 apple_and_self_vision: Optional[str] = 'binary'
-                 ):
 
-        self.lifespan = lifespan
-        self.apple_and_self_vision = apple_and_self_vision.lower()
-        self.score = 0  # Number of apples snake gets
-        self._fitness = 0  # Overall fitness
-        self._frames = 0  # Number of frames that the snake has been alive
-        self._frames_since_last_apple = 0
-        self.possible_directions = ('u', 'd', 'l', 'r')
+    # Initializing the Snake Class, different from initializing the snake on the grid (see below)
+    def __init__(
+        self,
+        grid_size                   : Tuple[int, int] = settings['grid_size'],
+        chromosome                  : Optional[Dict[str, List[np.ndarray]]] = None,
+        hidden_layer_architecture   : Optional[List[int]] = None,
+        hidden_layer_activation     : Optional[str] = None,
+        output_layer_activation     : Optional[str] = None,
+        start_position              : Optional[Point] = None,
+        start_direction             : Optional[Direction] = None,
+        lifespan                    : Optional[Union[int, float]] = np.inf,
+    ):
+        # super().__init__()
 
-        self.board_size = board_size
-        self.hidden_layer_architecture = hidden_layer_architecture
+        # Initializing snake's various values
+        self.lifespan                   = lifespan  # How long the snake can live
+        self.score                      = 0  # Number of apples snake gets
+        self._fitness                   = 0  # Overall fitness
+        self._frames                    = 0  # Number of frames that the snake has been alive
+        self._frames_since_last_apple   = 0  # Number of frames since last apple
+        self.possible_directions        = (Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT)  # Possible directions for snake to move
+        self.grid_size                  = grid_size  # Size of the grid available for snake to move
+        self._vision_type               = VISION_8 if settings['vision_type'] == 8 else VISION_4
+        # self._chromosome                = chromosome
 
-        
-        self.hidden_activation = hidden_activation
-        self.output_activation = output_activation
+        # The constants for snake's NN Architecture
+        self.hidden_layer_architecture  = hidden_layer_architecture
+        self.hidden_layer_activation    = hidden_layer_activation
+        self.output_layer_activation    = output_layer_activation
 
-        if not start_pos:
-            #@TODO: undo this
-            # x = random.randint(10, self.board_size[0] - 9)
-            # y = random.randint(10, self.board_size[1] - 9)
-            x = random.randint(2, self.board_size[0] - 3)
-            y = random.randint(2, self.board_size[1] - 3)
-
-            start_pos = Point(x, y)
-        self.start_pos = start_pos
-
-        self._vision_type = VISION_8
-        self._vision: List[Vision] = [None] * len(self._vision_type)
-        # This is just used so I can draw and is not actually used in the NN
-        self._drawable_vision: List[DrawableVision] = [None] * len(self._vision_type)
-
-        # Setting up network architecture
-        # Each "Vision" has 3 distances it tracks: wall, apple and self
-        # there are also one-hot encoded direction and one-hot encoded tail direction,
-        # each of which have 4 possibilities.
-        num_inputs = len(self._vision_type) * 3 + 4 + 4 #@TODO: Add one-hot back in 
+        # Setup the snake's NN Architecture
+        num_inputs = len(self._vision_type) * 8 + len(self.possible_directions)  # Number of inputs to the NN
         self.vision_as_array: np.ndarray = np.zeros((num_inputs, 1))
-        self.network_architecture = [num_inputs]                          # Inputs
-        self.network_architecture.extend(self.hidden_layer_architecture)  # Hidden layers
-        self.network_architecture.append(4)                               # 4 outputs, ['u', 'd', 'l', 'r']
-        self.network = FeedForwardNetwork(self.network_architecture,
-                                          get_activation_by_name(self.hidden_activation),
-                                          get_activation_by_name(self.output_activation)
+        self.network_architecture = [num_inputs]                           # Inputs to the NN
+        self.network_architecture.extend(self.hidden_layer_architecture)   # Hidden layers
+        self.network_architecture.append(len(self.possible_directions))    # Output layer
+        self.network = FeedForwardNetwork(
+            layer_nodes=self.network_architecture,
+            hidden_activation=get_activation_by_name(self.hidden_layer_activation),
+            output_activation=get_activation_by_name(self.output_layer_activation)
         )
 
         # If chromosome is set, take it
         if chromosome:
-            # self._chromosome = chromosome
             self.network.params = chromosome
-            # self.decode_chromosome()
         else:
-            # self._chromosome = {}
-            # self.encode_chromosome()
             pass
-            
 
-        # For creating the next apple
-        if apple_seed is None:
-            apple_seed = np.random.randint(-1000000000, 1000000000)
-        self.apple_seed = apple_seed  # Only needed for saving/loading replay
-        self.rand_apple = random.Random(self.apple_seed)
+        # Initialize the Snake and its food on the grid
+        self.initialize_snake(start_position, start_direction)
 
-        self.apple_location = None
-        if starting_direction:
-            starting_direction = starting_direction[0].lower()
+        # Required if the snake is to be saved
+        self.starting_position  = self.head
+        self.starting_direction = self.direction
+        self.starting_food_position = self.food
+
+    # Initialize the snake on the grid
+    def initialize_snake(self, start_position: Optional[Point] = None, start_direction: Optional[Direction] = None) -> None:
+        # Initialize the snake's head and body
+        self.head                   = start_position if start_position else self._random_point()
+        self.snake_array            = deque([self.head.copy()])
+        self._body_locations        = set(self.snake_array)
+        self.direction              = start_direction if start_position else self._random_direction()
+        self.tail_direction         = None
+        self.length                 = 1
+        self._vision_type           = VISION_8 if settings['vision_type'] == 8 else VISION_4
+        self._vision: List[Vision]  = [None] * len(self._vision_type)
+        self.is_alive               = True
+
+        # Initialize the snake's food on the grid
+        self._place_food()
+
+    # Get a random point on the grid
+    def _random_point(self) -> Point:
+        """
+        Generate a random point
+        """
+        x = randint(0, GRID_W - 1)
+        y = randint(0, GRID_H - 1)
+        return Point(x, y)
+
+    # Place food on the screen
+    def _place_food(self) -> None:
+        """
+        Place food randomly on the screen
+        """
+        possible_positions = set(Point(i, j) for i in range(self.grid_size[0]) for j in range(self.grid_size[1])) - self._body_locations
+        # possible_positions = []
+        # for i in range(self.grid_size[0]):
+        #     for j in range(self.grid_size[1]):
+        #         if (i, j) not in self._body_locations:
+        #             # self.food = Point(i, j)
+        #             possible_positions.append(Point(i, j))
+
+        if possible_positions:
+            self.food = choice(list(possible_positions))
         else:
-            starting_direction = self.possible_directions[random.randint(0, 3)]
+            print('You WON !!!!!')
+        # self.food = self._random_point()
+        # if self.food in self._body_locations:
+        #     if self.length >= self.grid_size[0] * self.grid_size[1]:
+        #         print('You WON !!!!!')
+        #     else:
+        #         self._place_food()
 
-        self.starting_direction = starting_direction  # Only needed for saving/loading replay
-        self.init_snake(self.starting_direction)
-        self.initial_velocity = initial_velocity
-        self.init_velocity(self.starting_direction, self.initial_velocity)
-        self.generate_apple()
+    # Get random Direction
+    def _random_direction(self) -> Direction:
+        """
+        Get random direction
+        """
+        return self.possible_directions[randint(0, 3)]
 
+    # Defining the (abstract) fitness property of the Individual class
     @property
     def fitness(self):
         return self._fitness
-    
+
+    # The fitness function for the snake's performance
     def calculate_fitness(self):
         # Give positive minimum fitness for roulette wheel selection
-        self._fitness = (self._frames) + ((2**self.score) + (self.score**2.1)*500) - (((.25 * self._frames)**1.3) * (self.score**1.2))
-        # self._fitness = (self._frames) + ((2**self.score) + (self.score**2.1)*500) - (((.25 * self._frames)) * (self.score))
+        self._fitness = (self._frames) + ((2**self.score) + (self.score**2.1) * 500) - (((.25 * self._frames)**1.3) * (self.score**1.2))
+        # self._fitness = (self._frames) + ((2**self.score) + (self.score**2.1) * 500) - (((.25 * self._frames)) * (self.score))
         self._fitness = max(self._fitness, .1)
 
+    # Defining the (abstract) chromosome property of the Individual class
     @property
     def chromosome(self):
         # return self._chromosome
         pass
 
+    # The encode function for the snake's chromosome
     def encode_chromosome(self):
         # # L = len(self.network.params) // 2
         # L = len(self.network.layer_nodes)
@@ -146,6 +158,7 @@ class Snake(Individual):
         #     self._chromosome['b' + l] = self.network.params['b' + l].flatten()
         pass
 
+    # The decode function for the snake's chromosome
     def decode_chromosome(self):
         # # L = len(self.network.params) // 2
         # L = len(self.network.layer_nodes)
@@ -158,313 +171,248 @@ class Snake(Individual):
         #     self.network.params['b' + l] = self._chromosome['b' + l].reshape(b_shape)
         pass
 
-    def look(self):
-        # Look all around
-        for i, slope in enumerate(self._vision_type):
-            vision, drawable_vision = self.look_in_direction(slope)
-            self._vision[i] = vision
-            self._drawable_vision[i] = drawable_vision
-        
-        # Update the input array
-        self._vision_as_input_array()
+    # Check if the given point is in the grid
+    def _is_inside_grid(self, point: Point) -> bool:
+        """
+        Check if the given point is in the grid
+        """
+        return 0 <= point.x < GRID_W and 0 <= point.y < GRID_H
 
+    # Check if food is in the given direction
+    def _is_food_in_direction(self, direction: Direction) -> bool:
+        """
+        Check if food is in the given direction
+        """
+        p = self.head.copy()
+        p += direction
+        while self._is_inside_grid(p):
+            if p == self.food:
+                return 1.0
+            p += direction
 
-    def look_in_direction(self, slope: Slope) -> Tuple[Vision, DrawableVision]:
-        dist_to_wall = None
-        dist_to_apple = np.inf
-        dist_to_self = np.inf
+        return 0.0
 
-        wall_location = None
-        apple_location = None
-        self_location = None
+    # Check if the snake's body is in the given direction
+    def _is_body_in_direction(self, direction: Direction) -> bool:
+        """
+        Check if body of the snake is in the given direction
+        """
+        p = self.head.copy()
+        p += direction
+        while self._is_inside_grid(p):
+            if p in self._body_locations:
+                return 1.0
+            p += direction
 
-        position = self.snake_array[0].copy()
-        distance = 1.0
-        total_distance = 0.0
+        return 0.0
 
-        # Can't start by looking at yourself
-        position.x += slope.run
-        position.y += slope.rise
-        total_distance += distance
-        body_found = False  # Only need to find the first occurance since it's the closest
-        food_found = False  # Although there is only one food, stop looking once you find it
+    # Find distance from head to wall in given direction
+    def _distance_to_wall(self, direction: Direction) -> float:
+        """
+        Find distance from head to wall in given direction
+        """
+        p = self.head.copy()
+        p += direction
+        distance = 0.0
+        while self._is_inside_grid(p):
+            distance += 1.0
+            p += direction
+        if distance == 0:
+            return 0.0
+        return 1 - 1 / distance
 
-        # Keep going until the position is out of bounds
-        while self._within_wall(position):
-            if not body_found and self._is_body_location(position):
-                dist_to_self = total_distance
-                self_location = position.copy()
-                body_found = True
-            if not food_found and self._is_apple_location(position):
-                dist_to_apple = total_distance
-                apple_location = position.copy()
-                food_found = True
+    # Look in given direction and calculate all the vision variables
+    def look_in_direction(self, direction: Direction) -> None:
+        """
+        Look in given direction and calculate all the vision variables
+        """
+        dist_to_wall    = self._distance_to_wall(direction)
+        is_food_visible = self._is_food_in_direction(direction)
+        is_body_visible = self._is_body_in_direction(direction)
 
-            wall_location = position
-            position.x += slope.run
-            position.y += slope.rise
-            total_distance += distance
-        assert(total_distance != 0.0)
+        return Vision(direction=direction, dist_to_wall=dist_to_wall, is_food_visible=is_food_visible, is_self_visible=is_body_visible)
 
+    # Convert the vision variables into a numpy array
+    def _vision_as_input_array(self):
 
-        # @TODO: May need to adjust numerator in case of VISION_16 since step size isn't always going to be on a tile
-        dist_to_wall = 1.0 / total_distance
-
-        if self.apple_and_self_vision == 'binary':
-            dist_to_apple = 1.0 if dist_to_apple != np.inf else 0.0
-            dist_to_self = 1.0 if dist_to_self != np.inf else 0.0
-
-        elif self.apple_and_self_vision == 'distance':
-            dist_to_apple = 1.0 / dist_to_apple
-            dist_to_self = 1.0 / dist_to_self
-
-        vision = Vision(dist_to_wall, dist_to_apple, dist_to_self)
-        drawable_vision = DrawableVision(wall_location, apple_location, self_location)
-        return (vision, drawable_vision)
-
-    def _vision_as_input_array(self) -> None:
         # Split _vision into np array where rows [0-2] are _vision[0].dist_to_wall, _vision[0].dist_to_apple, _vision[0].dist_to_self,
         # rows [3-5] are _vision[1].dist_to_wall, _vision[1].dist_to_apple, _vision[1].dist_to_self, etc. etc. etc.
-        for va_index, v_index in zip(range(0, len(self._vision) * 3, 3), range(len(self._vision))):
-            vision = self._vision[v_index]
-            self.vision_as_array[va_index, 0]     = vision.dist_to_wall
-            self.vision_as_array[va_index + 1, 0] = vision.dist_to_apple
-            self.vision_as_array[va_index + 2, 0] = vision.dist_to_self
+        for va_index, v_index in zip(range(0, len(self._vision), 3), range(0, len(self._vision))):
+            vision: Vision = self._vision[v_index]
+            self.vision_as_array[va_index, 0] = vision.dist_to_wall
+            self.vision_as_array[va_index + 1, 0] = vision.is_food_visible
+            self.vision_as_array[va_index + 2, 0] = vision.is_self_visible
 
-        i = len(self._vision) * 3  # Start at the end
+        # Now, encode the direction of the snake's head as one-hot encoding at the end of the array
+        i = len(self._vision) * 3
 
-        direction = self.direction[0].lower()
-        # One-hot encode direction
-        direction_one_hot = np.zeros((len(self.possible_directions), 1))
-        direction_one_hot[self.possible_directions.index(direction), 0] = 1
-        self.vision_as_array[i: i + len(self.possible_directions)] = direction_one_hot
+        direc = self.direction
+        self.vision_as_array[i, 0] = 1 if direc == Direction.UP else 0
+        self.vision_as_array[i + 1, 0] = 1 if direc == Direction.RIGHT else 0
+        self.vision_as_array[i + 2, 0] = 1 if direc == Direction.DOWN else 0
+        self.vision_as_array[i + 3, 0] = 1 if direc == Direction.LEFT else 0
 
-        i += len(self.possible_directions)
+    # Update the snake's vision
+    def update_vision(self) -> None:
 
-        # One-hot tail direction
-        tail_direction_one_hot = np.zeros((len(self.possible_directions), 1))
-        tail_direction_one_hot[self.possible_directions.index(self.tail_direction), 0] = 1
-        self.vision_as_array[i: i + len(self.possible_directions)] = tail_direction_one_hot
+        for i, dir in enumerate(self._vision_type):
+            self._vision[i] = self.look_in_direction(dir)
 
-    def _within_wall(self, position: Point) -> bool:
-        return position.x >= 0 and position.y >= 0 and \
-               position.x < self.board_size[0] and \
-               position.y < self.board_size[1]
+        # Convert it to a numpy array
+        self._vision_as_input_array()
 
-    def generate_apple(self) -> None:
-        width = self.board_size[0]
-        height = self.board_size[1]
-        # Find all possible points where the snake is not currently
-        possibilities = [divmod(i, height) for i in range(width * height) if divmod(i, height) not in self._body_locations]
-        if possibilities:
-            loc = self.rand_apple.choice(possibilities)
-            self.apple_location = Point(loc[0], loc[1])
-        else:
-            # I guess you win?
-            print('you won!')
-            pass
-
-    def init_snake(self, starting_direction: str) -> None:
-        """
-        Initialize teh snake.
-        starting_direction: ('u', 'd', 'l', 'r')
-            direction that the snake should start facing. Whatever the direction is, the head
-            of the snake will begin pointing that way.
-        """        
-        head = self.start_pos
-        # Body is below
-        if starting_direction == 'u':
-            snake = [head, Point(head.x, head.y + 1), Point(head.x, head.y + 2)]
-        # Body is above
-        elif starting_direction == 'd':
-            snake = [head, Point(head.x, head.y - 1), Point(head.x, head.y - 2)]
-        # Body is to the right
-        elif starting_direction == 'l':
-            snake = [head, Point(head.x + 1, head.y), Point(head.x + 2, head.y)]
-        # Body is to the left
-        elif starting_direction == 'r':
-            snake = [head, Point(head.x - 1, head.y), Point(head.x - 2, head.y)]
-
-        self.snake_array = deque(snake)
-        self._body_locations = set(snake)
-        self.is_alive = True
-
-    def update(self):
+    # Update the counters
+    def update(self) -> bool:
         if self.is_alive:
             self._frames += 1
-            self.look()
+            self.update_vision()
             self.network.feed_forward(self.vision_as_array)
             self.direction = self.possible_directions[np.argmax(self.network.out)]
             return True
         else:
             return False
 
+    # Check for collision with the wall and the body
+    def _check_collision(self) -> bool:
+        """
+        Check for collision with the wall and the body
+        """
+        # Check for collision with the wall
+        if self.head.x < 0 or self.head.x >= GRID_W or self.head.y < 0 or self.head.y >= GRID_H:
+            return True
+        # Check for collision with the body
+        if self.head in list(self._body_locations)[1:]:
+            return True
+
+        return False
+
+    # Move the snake
     def move(self) -> bool:
+
+        # Check if the snake is alive
         if not self.is_alive:
             return False
 
-        direction = self.direction[0].lower()
-        # Is the direction valid?
-        if direction not in self.possible_directions:
+        # Check if the direction is valid
+        if self.direction not in self.possible_directions:
             return False
-        
-        # Find next position
-        # tail = self.snake_array.pop()  # Pop tail since we can technically move to the tail
-        head = self.snake_array[0]
-        if direction == 'u':
-            next_pos = Point(head.x, head.y - 1)
-        elif direction == 'd':
-            next_pos = Point(head.x, head.y + 1)
-        elif direction == 'r':
-            next_pos = Point(head.x + 1, head.y)
-        elif direction == 'l':
-            next_pos = Point(head.x - 1, head.y)
 
-        # Is the next position we want to move valid?
-        if self._is_valid(next_pos):
-            # Tail
-            if next_pos == self.snake_array[-1]:
-                # Pop tail and add next_pos (same as tail) to front
-                # No need to remove tail from _body_locations since it will go back in anyway
-                self.snake_array.pop()
-                self.snake_array.appendleft(next_pos) 
-            # Eat the apple
-            elif next_pos == self.apple_location:
-                self.score += 1
-                self._frames_since_last_apple = 0
-                # Move head
-                self.snake_array.appendleft(next_pos)
-                self._body_locations.update({next_pos})
-                # Don't remove tail since the snake grew
-                self.generate_apple()
-            # Normal movement
-            else:
-                # Move head
-                self.snake_array.appendleft(next_pos)
-                self._body_locations.update({next_pos})
-                # Remove tail
-                tail = self.snake_array.pop()
-                self._body_locations.symmetric_difference_update({tail})
+        # Move the snake one cell ahead in the given direction
+        head = self.head.copy()
+        head += self.direction
 
-            # Figure out which direction the tail is moving
-            p2 = self.snake_array[-2]
-            p1 = self.snake_array[-1]
-            diff = p2 - p1
-            if diff.x < 0:
-                self.tail_direction = 'l'
-            elif diff.x > 0:
-                self.tail_direction = 'r'
-            elif diff.y > 0:
-                self.tail_direction = 'd'
-            elif diff.y < 0:
-                self.tail_direction = 'u'
+        # if the snake has reached its tail
+        if head == self.snake_array[-1]:
+            self.snake_array.pop()
+            self.snake_array.appendleft(head)
 
-            self._frames_since_last_apple += 1
-            #@NOTE: If you have different sized grids you may want to change this
-            if self._frames_since_last_apple > 100:
-                self.is_alive = False
-                return False
+        # Check if the snake has eaten the food
+        elif self.head == self.food:
+            self.score += 1
+            self.length += 1
+            self._frames_since_last_apple = 0
 
-            return True
+            self.snake_array.appendleft(head)
+            self._body_locations.update({head})
+            # # Remove the tail
+            # tail = self.snake_array.pop()
+            # self._body_locations.symmetric_difference_update({tail})
+
+            self._place_food()
+
         else:
+            # Move the snake's head
+            self.snake_array.appendleft(head)
+            self._body_locations.update({head})
+
+            # Remove the tail
+            tail = self.snake_array.pop()
+            self._body_locations.symmetric_difference_update({tail})
+
+        self.head = head
+        # Check for collisions
+        if self._check_collision():
             self.is_alive = False
             return False
 
-    def _is_apple_location(self, position: Point) -> bool:
-        return position == self.apple_location
+        self._frames_since_last_apple += 1
 
-    def _is_body_location(self, position: Point) -> bool:
-        return position in self._body_locations
-
-    def _is_valid(self, position: Point) -> bool:
-        """
-        Determine whether a given position is valid.
-        Return True if the position is on the board and does not intersect the snake.
-        Return False otherwise
-        """
-        if (position.x < 0) or (position.x > self.board_size[0] - 1):
-            return False
-        if (position.y < 0) or (position.y > self.board_size[1] - 1):
+        if self.score >= GRID_H * GRID_W:
+            print(f'Snake Scoring more than {GRID_H * GRID_W}. Snake Score: {self.score}. Snake Length: {self.length} or {len(self._body_locations)}')
+            self.is_alive = False
+            print('Snake WON !!!!')
             return False
 
-        if position == self.snake_array[-1]:
-            return True
-        # If the position is a body location, not valid.
-        # @NOTE: _body_locations will contain tail, so need to check tail first
-        elif position in self._body_locations:
+        # Finally, check if the no. of frames without food is greater than the max allowed
+        if self._frames_since_last_apple > GRID_H * GRID_W:
+            self.is_alive = False
             return False
-        # Otherwise you good
-        else:
-            return True
 
-    def init_velocity(self, starting_direction, initial_velocity: Optional[str] = None) -> None:
-        if initial_velocity:
-            self.direction = initial_velocity[0].lower()
-        # Whichever way the starting_direction is
-        else:
-            self.direction = starting_direction
+        return True
 
-        # Tail starts moving the same direction
-        self.tail_direction = self.direction
 
-def save_snake(population_folder: str, individual_name: str, snake: Snake, settings: Dict[str, Any]) -> None:
-    # Make population folder if it doesn't exist
+# The provision to save the snakes
+def save_snakes(population_folder: str, individual_name: str, snake: Snake, settings: Dict[str, Any]) -> None:
+    """
+    Save the snakes
+    """
+    # Make the population folder, if it doesn't exists
     if not os.path.exists(population_folder):
         os.makedirs(population_folder)
 
-    # Save off settings
+    # First save the settings for the current run
     if 'settings.json' not in os.listdir(population_folder):
-        f = os.path.join(population_folder, 'settings.json')
-        with open(f, 'w', encoding='utf-8') as out:
-            json.dump(settings, out, sort_keys=True, indent=4)
+        with open(os.path.join(population_folder, 'settings.json'), 'w') as f:
+            json.dump(settings, f, sort_keys=True, indent=4)
 
-    # Make directory for the individual
-    individual_dir = os.path.join(population_folder, individual_name)
-    os.makedirs(individual_dir)
+    # Make the folder for the current individual
+    individual_folder = os.path.join(population_folder, individual_name)
+    os.mkdir(individual_folder)
 
     # Save some constructor information for replay
-    # @NOTE: No need to save chromosome since that is saved as .npy
-    # @NOTE: No need to save board_size or hidden_layer_architecture
+    # NOTE: No need to save chromosome since that is saved as .npy
+    # NOTE: No need to save board_size or hidden_layer_architecture
     #        since these are taken from settings
     constructor = {}
-    constructor['start_pos'] = snake.start_pos.to_dict()
-    constructor['apple_seed'] = snake.apple_seed
-    constructor['initial_velocity'] = snake.initial_velocity
+    constructor['starting_positions'] = snake.starting_position
     constructor['starting_direction'] = snake.starting_direction
-    snake_constructor_file = os.path.join(individual_dir, 'constructor_params.json')
+    constructor['starting_food_position'] = snake.starting_food_position
+    snake_constructor_file = os.path.join(individual_folder, 'constructor_params.json')
 
     # Save
-    with open(snake_constructor_file, 'w', encoding='utf-8') as out:
-        json.dump(constructor, out, sort_keys=True, indent=4)
+    with open(snake_constructor_file, 'w') as f:
+        json.dump(constructor, f, sort_keys=True, indent=4)
 
-    L = len(snake.network.layer_nodes)
-    for l in range(1, L):
-        w_name = 'W' + str(l)
-        b_name = 'b' + str(l)
+    # Save the network
+    len_of_nodes = len(snake.network.layer_nodes)
+    for node in range(len_of_nodes):
+        weight_name = 'W' + str(node)
+        bias_name   = 'b' + str(node)
 
-        weights = snake.network.params[w_name]
-        bias = snake.network.params[b_name]
+        weights = snake.network.params[weight_name]
+        bias    = snake.network.params[bias_name]
 
-        np.save(os.path.join(individual_dir, w_name), weights)
-        np.save(os.path.join(individual_dir, b_name), bias)
+        np.save(os.path.join(individual_folder, weight_name), weights)
+        np.save(os.path.join(individual_folder, bias_name), bias)
 
 
-def load_snake(population_folder: str, individual_name: str, settings: Optional[Union[Dict[str, Any], str]] = None) -> Snake:
+# The provision to load the snakes
+def load_snakes(population_folder: str, individual_name: str, settings: Optional[Union[Dict[str, Any], str]] = None) -> Snake:
+
     if not settings:
         f = os.path.join(population_folder, 'settings.json')
         if not os.path.exists(f):
-            raise Exception("settings needs to be passed as an argument if 'settings.json' does not exist under population folder")
-        
-        with open(f, 'r', encoding='utf-8') as fp:
-            settings = json.load(fp)
+            raise Exception("Settings needs to be passed as an argument if 'settings.json' does not exist under population folder!!!")
+
+        with open(f, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
 
     elif isinstance(settings, dict):
         settings = settings
 
     elif isinstance(settings, str):
-        filepath = settings
-        with open(filepath, 'r', encoding='utf-8') as fp:
-            settings = json.load(fp)
+        with open(settings, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
 
     params = {}
     for fname in os.listdir(os.path.join(population_folder, individual_name)):
@@ -475,21 +423,21 @@ def load_snake(population_folder: str, individual_name: str, settings: Optional[
         else:
             continue
 
-    # Load constructor params for the specific snake
     constructor_params = {}
     snake_constructor_file = os.path.join(population_folder, individual_name, 'constructor_params.json')
-    with open(snake_constructor_file, 'r', encoding='utf-8') as fp:
-        constructor_params = json.load(fp)
+    with open(snake_constructor_file, 'r', encoding='utf-8') as f:
+        constructor_params = json.load(f)
 
-    snake = Snake(settings['board_size'], chromosome=params, 
-                  start_pos=Point.from_dict(constructor_params['start_pos']),
-                  apple_seed=constructor_params['apple_seed'],
-                  initial_velocity=constructor_params['initial_velocity'],
-                  starting_direction=constructor_params['starting_direction'],
-                  hidden_layer_architecture=settings['hidden_network_architecture'],
-                  hidden_activation=settings['hidden_layer_activation'],
-                  output_activation=settings['output_layer_activation'],
-                  lifespan=settings['lifespan'],
-                  apple_and_self_vision=settings['apple_and_self_vision']
-                  )
+    snake = Snake(
+        grid_size=settings['grid_size'],
+        starting_positions=constructor_params['starting_positions'],
+        starting_direction=constructor_params['starting_direction'],
+        starting_food_position=constructor_params['starting_food_position'],
+        hidden_layer_architecture=settings['hidden_layer_architecture'],
+        hidden_layer_activation=settings['hidden_layer_activation'],
+        output_layer_activation=settings['output_layer_activation'],
+        lifespan=settings['lifespan'],
+        chromosome=params
+    )
+
     return snake

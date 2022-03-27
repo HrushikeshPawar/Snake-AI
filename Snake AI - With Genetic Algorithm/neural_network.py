@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Callable, NewType, Optional
+from typing import List, NewType, Optional, Callable
 
 
 ActivationFunction = NewType('ActivationFunction', Callable[[np.ndarray], np.ndarray])
@@ -28,27 +28,27 @@ class FeedForwardNetwork(object):
         self.rand = np.random.RandomState(seed)
 
         # Initialize weights and bias
-        for l in range(1, len(self.layer_nodes)):
+        for layer_num in range(1, len(self.layer_nodes)):
             if init_method == 'uniform':
-                self.params['W' + str(l)] = np.random.uniform(-1, 1, size=(self.layer_nodes[l], self.layer_nodes[l-1]))
-                self.params['b' + str(l)] = np.random.uniform(-1, 1, size=(self.layer_nodes[l], 1))
+                self.params['W' + str(layer_num)] = np.random.uniform(-1, 1, size=(self.layer_nodes[layer_num], self.layer_nodes[layer_num - 1]))
+                self.params['b' + str(layer_num)] = np.random.uniform(-1, 1, size=(self.layer_nodes[layer_num], 1))
 
             else:
                 raise Exception('Implement more options, bro')
 
-            self.params['A' + str(l)] = None
+            self.params['A' + str(layer_num)] = None
 
     def feed_forward(self, X: np.ndarray) -> np.ndarray:
         A_prev = X
         L = len(self.layer_nodes) - 1  # len(self.params) // 2
 
         # Feed hidden layers
-        for l in range(1, L):
-            W = self.params['W' + str(l)]
-            b = self.params['b' + str(l)]
+        for layer_num in range(1, L):
+            W = self.params['W' + str(layer_num)]
+            b = self.params['b' + str(layer_num)]
             Z = np.dot(W, A_prev) + b
             A_prev = self.hidden_activation(Z)
-            self.params['A' + str(l)] = A_prev
+            self.params['A' + str(layer_num)] = A_prev
 
         # Feed output
         W = self.params['W' + str(L)]
@@ -69,7 +69,8 @@ def get_activation_by_name(name: str) -> ActivationFunction:
                    ('sigmoid', sigmoid),
                    ('linear', linear),
                    ('leaky_relu', leaky_relu),
-                   ('tanh', tanh)]
+                   ('tanh', tanh),
+                   ]
 
     func = [activation[1] for activation in activations if activation[0].lower() == name.lower()]
     assert len(func) == 1

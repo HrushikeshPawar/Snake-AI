@@ -1,28 +1,29 @@
-import pygame
+from snake import Snake  # , save_snakes, load_snakes
 from settings import settings
-from helper import Point, Direction
-from random import randint
-from time import perf_counter
-import os
-from glob import glob
-from datetime import datetime
-import moviepy.editor as mpy
-
+import pygame
+import numpy as np
+import random
+from math import sqrt
+from tqdm import tqdm
+from typing import List, Tuple
+from genetic_algorithm.individual import Individual
+from genetic_algorithm.population import Population
+from genetic_algorithm.selection import elitism_selection, roulette_wheel_selection
+from genetic_algorithm.crossover import simulated_binary_crossover as SBX
+from genetic_algorithm.crossover import single_point_binary_crossover
+from genetic_algorithm.mutation import gaussian_mutation, random_uniform_mutation
 
 # Initialize the Pygame environment
 pygame.init()
 
-
-# Defining the required Constants
-# Game Environment
+# Define the CONSTANTS
+GRID_H, GRID_W = settings['grid_size']
 BLOCKSIZE = settings['block_size']
-GRID_H    = settings['grid_height']
-GRID_W    = settings['grid_width']
 BORDER    = settings['border']
 SPEED     = settings['speed']
-FONT      = settings['font']
+FONT      = pygame.font.Font(settings['font'], 20)
 
-# Colors for the Game
+# Colors
 BLACK     = settings['black']
 WHITE     = settings['white']
 GREY      = settings['grey']
@@ -32,7 +33,6 @@ GREEN2    = settings['green2']
 BLUE      = settings['blue']
 BLUE2     = settings['blue2']
 
-
 # File Paths
 GIF_path          = settings['GIF_path']
 Graph_path        = settings['Graph_path']
@@ -41,275 +41,383 @@ Checkpoint_path   = settings['Checkpoint_path']
 Log_path          = settings['Log_path']
 
 
-# The Snake Class
-class Snake:
+#  The Main Game Class
+#  This class is responsible for the game loop and its components
+class Main_Game:
 
-    def __init__(self, start_pos: Point, start_dir: Direction = None) -> None:
+    def __init__(self, show: bool = False) -> None:
 
-        # Initialize the Snake
-        self.head           = start_pos
-        self.body           = [self.head]
-        self.direction      = start_dir
-        self.tail_direction = None
-        self.length         = 1
+        self.show               = show
+        self.settings           = settings
+        self._SBX_eta           = self.settings['SBX_eta']
+        self._mutation_bins     = np.cumsum([self.settings['probability_gaussian'], self.settings['probability_random_uniform']])
+        self._crossover_bins    = np.cumsum([self.settings['probability_SBX'], self.settings['probability_SPBX']])
+        self._SPBX_type         = self.settings['SPBX_type'].lower()
+        self._mutation_rate     = self.settings['mutation_rate']
 
-    def __str__(self) -> str:
-        return f'''Snake(\n\thead\t  = {self.head},\n\ttail\t  = {self.tail},\n\tlength\t  = {self.length},\n\tdirection =   {self.direction}\n)'''
-
-    __repr__ = __str__
-
-    # Move the Snake
-    def move(self, action: Direction) -> None:
-        """
-        Move the snake in the given direction
-        """
-        if isinstance(action, Direction):
-            self.direction = action
-            self.head += self.direction.value
+        # Determine size of next gen based off selection type
+        self._next_gen_size = None
+        if self.settings['selection_type'].lower() == 'plus':
+            self._next_gen_size = self.settings['num_parents'] + self.settings['num_offspring']
+        elif self.settings['selection_type'].lower() == 'comma':
+            self._next_gen_size = self.settings['num_offspring']
         else:
-            # pass
-            raise('Not a valid direction. Pass an element of the Direction Enum')
+            raise Exception(f"Selection type {self.settings['selection_type']} is invalid")
 
+        # self.width             = (GRID_W * 4) * BLOCKSIZE
+        # self.height            = (GRID_H * 4) * BLOCKSIZE
+        self.width             = (GRID_W) * BLOCKSIZE
+        self.height            = (GRID_H) * BLOCKSIZE
+        self.snake_board_width      = GRID_W * BLOCKSIZE
+        self.snake_board_height    = GRID_H * BLOCKSIZE
 
-# The main class for the game
-# This class is responsible for the game logic
-class SnakeGame:
+        individuals: List[Individual] = []
 
-    def __init__(self, save_gif : bool = False, is_human: bool = True) -> None:
+        # Generate the first generation of individuals
+        for _ in range(self.settings['num_parents'] + 1):
+            individual = Snake(
+                grid_size=(GRID_W, GRID_H),
+                hidden_layer_architecture=self.settings['hidden_network_architecture'],
+                hidden_layer_activation=self.settings['hidden_layer_activation'],
+                output_layer_activation=self.settings['output_layer_activation']
+            )
+            individuals.append(individual)
 
-        # Set Window Size
-        self.width = GRID_W * BLOCKSIZE
-        self.height = GRID_H * BLOCKSIZE
-        self.n_games = 0
-        self.speed = SPEED
-        self.is_human = is_human
+        self.best_fitness = 0
+        self.best_score = 0
 
+        self._current_individual = 0
+        self.population = Population(individuals)
+
+        self.snake: Snake = self.population.individuals[self._current_individual]
+        self.current_generation = 0
+
+        # Initialize the window
+        # self.init_window()
+
+        # Initialize the game loop
+        # while self.current_generation < self.settings['total_generations']:
+        #     self.game_loop()
+            # self.clock.tick(SPEED)
+        self.play()
+
+    # Initialize the game window
+    def init_window(self):
         # Initialize Window
         self.display = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption(f"Snake Game  ({self.n_games}th Game)")
+        pygame.display.set_caption(f"Snake Game  (Generation {self.current_generation + 1})")
         self.clock = pygame.time.Clock()
 
-        # Initialize Game State
-        self.reset()
+        # Create Snake Window
+        self.snake_window = Snake_Window(parent=self.display, board_size=(self.snake_board_width, self.snake_board_height), snake=self.snake)
 
-        # Rest settings
-        self.save_gif = save_gif
-        self.start_time = perf_counter()
-        pygame.image.save(self.display, os.path.join(GIF_path, "screenshot00.png"))
-        self.img_cnt = 1
+    # Play the Game
+    def play(self):
 
-    # Reset the game state
-    def reset(self) -> None:
+        # Initialize the window
+        if self.show:
+            self.init_window()
 
-        # Initialize the Snake
-        self.snake           = Snake()
-        self.snake.direction = None
-        self.snake.length    = 1
-        self.snake.tail_direction = None
-        self._place_snake()
+        # Continue playing till number of generations is reached
+        
+        while self.current_generation < self.settings['total_generations']:
 
-        # Place food
-        self.food = None
-        self._place_food()
+            with tqdm(total=self._next_gen_size, desc=f"Current Generation {self.current_generation + 1}") as pbar:
+                while (self.current_generation > 0 and self._current_individual < self._next_gen_size - 1) or \
+                      (self.current_generation == 0 and self._current_individual < settings['num_parents']):
 
-        # Initialize score
-        self.score  = 0
+                    self.game_loop()
+                    if not self.snake.is_alive:
+                        pbar.update(1)
 
-        # Initialize Frame Iteration Count
-        self.frame_iteration = 0
+                    if self.show:
+                        self.clock.tick(SPEED)
 
-    # Get a random point on the grid
-    def _random_point(self) -> Point:
-        """
-        Generate a random point
-        """
-        x = randint(0, GRID_W - 1) * BLOCKSIZE
-        y = randint(0, GRID_H - 1) * BLOCKSIZE
-        return Point(x, y)
+            print(f'======================= Gneration {self.current_generation + 1} =======================')
+            print('----Max fitness:', self.population.fittest_individual.fitness)
+            print('----Best Score:', self.population.fittest_individual.score)
+            print('----Average fitness:', self.population.average_fitness)
+            print('\n\n')
 
-    # Place food on the screen
-    def _place_food(self) -> None:
-        """
-        Place food randomly on the screen
-        """
-        self.food = self._srandom_point()
+            if self.show:
+                pygame.display.quit()
+            self.next_generation()
 
-        # If food is placed on snake, place food again
-        while self.food in self.snake.body:
-            self._place_food()
+    # The Game Loop
+    def game_loop(self) -> None:
 
-    # Place snake on Screen
-    def _place_snake(self) -> None:
-        """
-        Place snake on the screen
-        """
-        self.snake.head = self._random_point()
+        if self.show:
+            self.snake_window._update_ui()
 
-    def _get_input(self) -> None:
+        # If the current snake is alive
+        if self.snake.is_alive:
+            self.snake.update()
+            self.snake.move()
 
-        for event in pygame.event.get():
+            # Check for the score
+            if self.snake.score > GRID_H * GRID_W:
+                print(f'Snake Scoring more than {GRID_H * GRID_W}. Snake Score: {self.snake.score}. Snake Length: {self.snake.length} or {len(self.snake._body_locations)}')
+            if self.snake.score > self.best_score:
+                self.best_score = self.snake.score
 
-            # CHECK IF USER QUITS
-            if event.type == pygame.QUIT:
-                # pygame.quit()
-                # quit()
-                raise KeyboardInterrupt
+        # If the snake is dead
+        else:
+            # Calculate fitness of current individual
+            self.snake.calculate_fitness()
+            fitness = self.snake.fitness
 
-            # CHECK IF USER PRESSES A KEY
-            if self.is_human and event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_UP:
-                    self.snake.direction = Direction.UP
-                elif event.key == pygame.K_DOWN:
-                    self.snake.direction = Direction.DOWN
-                elif event.key == pygame.K_LEFT:
-                    self.snake.direction = Direction.LEFT
-                elif event.key == pygame.K_RIGHT:
-                    self.snake.direction = Direction.RIGHT
+            if fitness > self.best_fitness:
+                self.best_fitness = fitness
 
-    def _is_collision(self) -> bool:
-        """
-        Check if the snake has collided with itself or the wall
-        Updated this function to check for dangers for next step as well
-        """
-        """
-        Check if the snake has collided with itself
-        """
-        if self.snake.head.x < 0 or self.snake.head.x > self.width - BLOCKSIZE or self.snake.head.y < 0 or self.snake.head.y > self.height - BLOCKSIZE:
-            return True
-        return (self.snake.head in self.snake.body[1:])
+            # Change the snake
+            self._current_individual += 1
+            self.snake = self.population.individuals[self._current_individual]
 
+            if self.show:
+                self.snake_window.snake = self.snake
+
+    # Create the next generation
+    def next_generation(self) -> None:
+
+        self.current_generation += 1
+        self._current_individual = 0
+
+        # Calculate fitness of individuals
+        self.population.calculate_fitness()
+
+        # Create the next generation of individuals first with elite parents
+        self.population.individuals = elitism_selection(self.population, self.settings['num_parents'])
+
+        random.shuffle(self.population.individuals)
+        next_pop: List[Snake] = []
+
+        # parents + offspring selection type ('plus')
+        if self.settings['selection_type'].lower() == 'plus':
+
+            # Decrement lifespan
+            # for individual in self.population.individuals:
+            #     individual.lifespan -= 1
+
+            for individual in self.population.individuals:
+                individual: Snake
+                individual.lifespan -= 1
+
+                params                      = self.snake.network.params
+                board_size                  = individual.grid_size
+                hidden_layer_architecture   = individual.hidden_layer_architecture
+                hidden_activation           = individual.hidden_layer_activation
+                output_activation           = individual.output_layer_activation
+                lifespan                    = individual.lifespan
+                # starting_position           = individual.starting_position
+                # starting_food_position      = individual.starting_food_position
+                # starting_direction          = individual.starting_direction
+
+                # If the individual is still alive, they survive
+                if lifespan > 0:
+                    s = Snake(
+                        grid_size=board_size,
+                        chromosome=params,
+                        hidden_layer_architecture=hidden_layer_architecture,
+                        hidden_layer_activation=hidden_activation,
+                        output_layer_activation=output_activation,
+                        lifespan=lifespan,
+                    )
+                    next_pop.append(s)
+            # print('----Elite parents:', len(self.population.individuals))
+            # print('Creating childern from elite parents')
+
+        while len(next_pop) < self._next_gen_size:
+
+            # Select parents for crossover
+            parent1, parent2 = roulette_wheel_selection(self.population, 2)
+            parent1: Snake
+            parent2: Snake
+
+            L             = len(parent1.network.layer_nodes)
+            child1_params = {}
+            child2_params = {}
+
+            for node in range(1, L):
+                # Get the Weight and Bais of parents, which work as our chromosomes
+                parent1_W_l = parent1.network.params['W' + str(node)]
+                parent2_W_l = parent2.network.params['W' + str(node)]
+                parent1_b_l = parent1.network.params['b' + str(node)]
+                parent2_b_l = parent2.network.params['b' + str(node)]
+
+                # Crossover
+                # NOTE: I am choosing to perform the same type of crossover on the weights and the bias.
+                child1_W_l, child2_W_l, child1_b_l, child2_b_l = self._crossover(parent1_W_l, parent2_W_l, parent1_b_l, parent2_b_l)
+
+                # Mutation
+                # NOTE: I am choosing to perform the same type of mutation on the weights and the bias.
+                # child1_W_l, child2_W_l, child1_b_l, child2_b_l = self._mutation(child1_W_l, child2_W_l, child1_b_l, child2_b_l)
+                self._mutation(child1_W_l, child2_W_l, child1_b_l, child2_b_l)
+
+                # Assign children from crossover/mutation
+                child1_params['W' + str(node)] = child1_W_l
+                child2_params['W' + str(node)] = child2_W_l
+                child1_params['b' + str(node)] = child1_b_l
+                child2_params['b' + str(node)] = child2_b_l
+
+                # Clip to [-1, 1]
+                np.clip(child1_params['W' + str(node)], -1, 1, out=child1_params['W' + str(node)])
+                np.clip(child2_params['W' + str(node)], -1, 1, out=child2_params['W' + str(node)])
+                np.clip(child1_params['b' + str(node)], -1, 1, out=child1_params['b' + str(node)])
+                np.clip(child2_params['b' + str(node)], -1, 1, out=child2_params['b' + str(node)])
+
+            # Create children from chromosomes generated above
+            child1 = Snake(
+                parent1.grid_size,
+                chromosome=child1_params,
+                hidden_layer_architecture=parent1.hidden_layer_architecture,
+                hidden_layer_activation=parent1.hidden_layer_activation,
+                output_layer_activation=parent1.output_layer_activation,
+                lifespan=self.settings['lifespan']
+            )
+            child2 = Snake(
+                parent2.grid_size,
+                chromosome=child2_params,
+                hidden_layer_architecture=parent2.hidden_layer_architecture,
+                hidden_layer_activation=parent2.hidden_layer_activation,
+                output_layer_activation=parent2.output_layer_activation,
+                lifespan=self.settings['lifespan']
+            )
+
+            # Add children to the next generation
+            next_pop.extend([child1, child2])
+
+        # Set the next generation
+        random.shuffle(next_pop)
+        self.population.individuals = next_pop
+
+        # Initialize the window
+        if self.show:
+            self.init_window()
+
+    # Crossover
+    def _crossover(
+        self,
+        parent1_weights: np.ndarray,
+        parent2_weights: np.ndarray,
+        parent1_bias   : np.ndarray,
+        parent2_bias   : np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+        rand_crossover = random.random()
+        crossover_bucket = np.digitize(rand_crossover, self._crossover_bins)
+        child1_weights, child2_weights = None, None
+        child1_bias, child2_bias = None, None
+
+        # SBX
+        if crossover_bucket == 0:
+            child1_weights, child2_weights = SBX(parent1_weights, parent2_weights, self._SBX_eta)
+            child1_bias, child2_bias       = SBX(parent1_bias, parent2_bias, self._SBX_eta)
+
+        # Single point binary crossover (SPBX)
+        elif crossover_bucket == 1:
+            child1_weights, child2_weights = single_point_binary_crossover(parent1_weights, parent2_weights, major=self._SPBX_type)
+            child1_bias, child2_bias       = single_point_binary_crossover(parent1_bias, parent2_bias, major=self._SPBX_type)
+
+        else:
+            raise Exception('Unable to determine valid crossover based off probabilities')
+
+        return child1_weights, child2_weights, child1_bias, child2_bias
+
+    # Mutation
+    def _mutation(
+        self,
+        child1_weights: np.ndarray,
+        child2_weights: np.ndarray,
+        child1_bias   : np.ndarray,
+        child2_bias   : np.ndarray
+    ) -> None:
+
+        scale = .2
+        rand_mutation = random.random()
+        mutation_bucket = np.digitize(rand_mutation, self._mutation_bins)
+
+        mutation_rate = self._mutation_rate
+        if self.settings['mutation_rate_type'].lower() == 'decaying':
+            mutation_rate = mutation_rate / sqrt(self.current_generation + 1)
+
+        # Gaussian
+        if mutation_bucket == 0:
+            # Mutate weights
+            child1_weights  = gaussian_mutation(child1_weights, mutation_rate, scale=scale)
+            child2_weights  = gaussian_mutation(child2_weights, mutation_rate, scale=scale)
+
+            # Mutate bias
+            child1_bias     = gaussian_mutation(child1_bias, mutation_rate, scale=scale)
+            child2_bias     = gaussian_mutation(child2_bias, mutation_rate, scale=scale)
+
+        # Uniform random
+        elif mutation_bucket == 1:
+            # Mutate weights
+            random_uniform_mutation(child1_weights, mutation_rate, -1, 1)
+            random_uniform_mutation(child2_weights, mutation_rate, -1, 1)
+
+            # Mutate bias
+            random_uniform_mutation(child1_bias, mutation_rate, -1, 1)
+            random_uniform_mutation(child2_bias, mutation_rate, -1, 1)
+
+        else:
+            raise Exception('Unable to determine valid mutation based off probabilities.')
+
+        return child1_weights, child2_weights, child1_bias, child2_bias
+
+
+# The Snake Window Class
+class Snake_Window:
+    def __init__(self, parent: pygame.display, board_size=Tuple[int, int], snake: Snake = None) -> None:
+        # super().__init__(parent)
+        self.board_size = board_size
+        self.display    = parent
+
+        if snake:
+            self.snake = snake
+
+    def start_game(self) -> None:
+        self.snake = Snake(self.board_size)
+
+    def update(self) -> None:
+        if self.snake.is_alive:
+            self.snake.update()
+
+        else:
+            pass
+
+    # Update the pygame window
     def _update_ui(self) -> None:
         """
         Update the UI
         """
         # Clear the screen
         self.display.fill(BLACK)
+        # self.display.fill(WHITE)
 
         # Draw the food
-        pygame.draw.rect(self.display, RED, (self.food.x, self.food.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+        pygame.draw.rect(self.display, RED, (self.snake.food.x * BLOCKSIZE, self.snake.food.y * BLOCKSIZE, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
 
         # Draw the snake
-        pygame.draw.rect(self.display, GREY, (self.snake.head.x, self.snake.head.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
-        pygame.draw.rect(self.display, WHITE, (self.snake.head.x + 4, self.snake.head.y + 4, 12 - BORDER, 12 - BORDER))
+        pygame.draw.rect(self.display, GREY, (self.snake.head.x * BLOCKSIZE, self.snake.head.y * BLOCKSIZE, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+        pygame.draw.rect(self.display, WHITE, (self.snake.head.x * BLOCKSIZE + 4, self.snake.head.y * BLOCKSIZE + 4, 12 - BORDER, 12 - BORDER))
         try:
-            for point in self.snake.body[1:-1]:
-                pygame.draw.rect(self.display, BLUE, (point.x, point.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
-                pygame.draw.rect(self.display, BLUE2, (point.x + 4, point.y + 4, 12 - BORDER, 12 - BORDER))
-            point = self.snake.body[-1]
-            pygame.draw.rect(self.display, GREEN, (point.x, point.y, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
-            pygame.draw.rect(self.display, GREEN2, (point.x + 4, point.y + 4, 12 - BORDER, 12 - BORDER))
+            for point in list(self.snake._body_locations)[1:]:
+                pygame.draw.rect(self.display, BLUE, (point.x * BLOCKSIZE, point.y * BLOCKSIZE, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+                pygame.draw.rect(self.display, BLUE2, (point.x * BLOCKSIZE + 4, point.y * BLOCKSIZE + 4, 12 - BORDER, 12 - BORDER))
+            point = list(self.snake._body_locations)[1:][-1]
+            pygame.draw.rect(self.display, GREEN, (point.x * BLOCKSIZE, point.y * BLOCKSIZE, BLOCKSIZE - BORDER, BLOCKSIZE - BORDER))
+            pygame.draw.rect(self.display, GREEN2, (point.x * BLOCKSIZE + 4, point.y * BLOCKSIZE + 4, 12 - BORDER, 12 - BORDER))
         except IndexError:
             pass
 
         # Draw the score
-        text = FONT.render(f'Score: {self.score}', True, WHITE)
+        text = FONT.render(f'Score: {self.snake.score}', True, WHITE)
         self.display.blit(text, (1, 1))
 
         # Update the display
         pygame.display.update()
 
-    def _save_gif(self) -> None:
-        """
-        Save the game as a gif
-        """
-        end_time  = perf_counter()
-        duration  = int(end_time - self.start_time)
-        print(f'Game Time : {end_time - self.start_time}')
-        print('\nMaking GIF...')
-
-        imgs = glob(os.path.join(GIF_path, "*.png"))
-        list.sort(imgs, key=lambda x: int(x.split('screenshot')[1].split('.png')[0]))
-
-        txt_path = os.path.join(GIF_path, 'Image_List.txt')
-        with open(txt_path, 'w') as file:
-            for item in imgs:
-                file.write(f"{item}\n")
-
-        FPS = len(imgs) // duration
-        now = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        n = len(glob(os.path.join(GIF_path, "*.gif")))
-        filename = os.path.join(GIF_path, f'Game {n} - {GRID_W} X {GRID_H} Grid - {now}.gif')
-
-        clip = mpy.ImageSequenceClip(imgs, fps=FPS)
-        clip.write_gif(filename, fps=FPS)
-        os.startfile(filename)
-        print(f'GIF saved to {filename}')
-
-        # Remove all the images
-        print(f'Removing {len(imgs)} images...')
-        for img in imgs:
-            os.remove(img)
-        print(f'Removed {len(imgs)} images.\n')
-
-    def play_step(self, action: Direction = None) -> None:
-        """
-        Play a single step of the game
-        """
-        self.frame_iteration += 1
-
-        # Step 1 - Get input from the User
-        self._get_input()
-
-        # Step 2 - Move the Snake
-        if self.ishuman:
-            self.snake.move(self.snake.direction)
-        else:
-            self.snake.move(action)
-            pass
-        pygame.image.save(self.display, os.path.join(GIF_path, f"screenshot0{self.img_cnt}.png"))
-        self.img_cnt += 1
-
-        # Step 3 - Place new food or just move
-        if self.snake.head == self.food:
-            self.score += 1
-            self.snake.length += 1
-            self._place_food()
-        else:
-            try:
-                self.snake.tail.pop()
-            except IndexError:
-                pass
-
-        # Step 4 - Check if Game Over
-        game_over = False
-        if self._is_collision():
-            game_over = True
-
-            if self.save_gif:
-                self._save_gif()
-
-            if self.ishuman:
-                return game_over, self.score
-            else:
-                pass
-
-            if not self.ishuman:
-                pass
-        # pygame.image.save(self.display, os.path.join(IMG_DIR, f"screenshot0{self.img_cnt}.png"))
-        # self.img_cnt += 1
-
-        # Step 5 - Update UI and clock
-        self._update_ui()
-        self.clock.tick(self.speed)
-
-        # Step 6 - Return Game Over and Score
-        return game_over, self.score
-
 
 if __name__ == '__main__':
-
-    game = SnakeGame(ishuman=True)
-    print('Starting Game...')
-
-    try:
-        while True:
-            game_over, score = game.play_step()
-
-            if game_over:
-                print(f'Game Over! Your score is {score}.\n')
-                break
-    except KeyboardInterrupt:
-        print('\n\nExiting...')
-        print(f'Your score is {score}.\n')
-        pygame.quit()
-        quit()
+    main_game = Main_Game()
