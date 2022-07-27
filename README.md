@@ -1,5 +1,7 @@
 # Snake AI
 
+**Update:** This repo has been archived. It was meant for testing purpose. I am working on an project which will deploy nearly all possible techniques to play the Snakes game. Stay tuned for more updates.
+
 A fun project to learn different techniques to solving (playing) the Snake Game.
 The code is not yet ready and may not be readable as I am still learning it is meant for my understanding.
 Nevertheless you are free to have a look.
